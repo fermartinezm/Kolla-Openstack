@@ -1,0 +1,120 @@
+---
+- name: Show databases
+  command: docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show databases;" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: databases
+  changed_when: databases.rc == 0
+
+- name: Create {{ GLANCE_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ GLANCE_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(GLANCE_DB) == -1
+
+- name: Check privileges for {{ GLANCE_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ GLANCE_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ GLANCE_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ GLANCE_DB }}.* to {{ GLANCE_DB_USER }}@\"localhost\" identified by \"{{ GLANCE_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find('@localhost') == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ GLANCE_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ GLANCE_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ GLANCE_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ GLANCE_DB }}.* to {{ GLANCE_DB_USER }}@\"%\" identified by \"{{ GLANCE_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find('@%') == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ IMAGE_GLANCE }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/glance'
+      pull: no
+    name: '{{ IMAGE_GLANCE }}'
+    source: build
+
+- name: Create {{ CONTAINER_GLANCE }}
+  docker_container:
+    name: '{{ CONTAINER_GLANCE }}'
+    image: '{{ IMAGE_GLANCE }}'
+    published_ports: '{{ PORT_GLANCE }}:{{ PORT_GLANCE }}'
+    volumes:
+      - '{{ PROJECT_PATH }}/volumes/images:/var/lib/glance/images/'
+    state: started
+
+- name: Check if service project already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source /root/admin-openrc && openstack project list'
+  register: project_list
+
+- name: Create service project
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack project create --domain default --description "Service Project" service'
+  when: project_list.stdout.find('service') == -1
+
+- name: Check if {{ GLANCE_USER }} user already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source /root/admin-openrc && openstack user list'
+  register: user_list
+
+- name: Create {{ GLANCE_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user create --domain default --project service --password {{ GLANCE_PASS }} {{ GLANCE_USER }}'
+  when: user_list.stdout.find(GLANCE_USER) == -1
+
+- name: Check if {{ GLANCE_USER }} user has admin role
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role assignment list --names'
+  register: role_asssignment
+
+- name: Add admin role to {{ GLANCE_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role add --project service --user {{ GLANCE_USER }} admin'
+  when: role_asssignment.stdout.find(GLANCE_USER) == -1
+
+- name: Check if {{ GLANCE_SERVICE_NAME }} service already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service list'
+  register: service
+
+- name: Create {{ GLANCE_SERVICE_NAME }} service
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ GLANCE_SERVICE_NAME }} --description "OpenStack Image" image'
+  when: service.stdout.find(GLANCE_SERVICE_NAME) == -1
+
+- name: Inspect {{ CONTAINER_GLANCE }}
+  command: docker inspect {{ CONTAINER_GLANCE }}
+  register: glance_ip
+  changed_when: glance_ip.rc == 0
+
+- name: Get {{ CONTAINER_GLANCE }} IP
+  set_fact:
+    glance_ip: "{{ glance_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Check if {{ GLANCE_SERVICE_NAME }} endpoints already exist
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint list'
+  register: endpoints
+
+- name: Create {{ GLANCE_SERVICE_NAME }} public endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne image public http://{{ glance_ip }}:{{ PORT_GLANCE }}'
+  when: endpoints.stdout.find(GLANCE_SERVICE_NAME) == -1
+
+- name: Create {{ GLANCE_SERVICE_NAME }} internal endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne image internal http://{{ glance_ip }}:{{ PORT_GLANCE }}'
+  when: endpoints.stdout.find(GLANCE_SERVICE_NAME) == -1
+
+- name: Create {{ GLANCE_SERVICE_NAME }} admin endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne image admin http://{{ glance_ip }}:{{ PORT_GLANCE }}'
+  when: endpoints.stdout.find(GLANCE_SERVICE_NAME) == -1

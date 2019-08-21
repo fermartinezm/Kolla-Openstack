@@ -1,0 +1,53 @@
+---
+- name: Create rabbitmq image
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/rabbitmq'
+      pull: no
+    name: '{{ IMAGE_RABBITMQ }}'
+    source: build
+
+- name: Create rabbitmq container
+  docker_container:
+    name: '{{ CONTAINER_RABBITMQ }}'
+    image: '{{ IMAGE_RABBITMQ }}'
+    published_ports:
+      - '{{ PORT1_RABBITMQ }}:{{ PORT1_RABBITMQ }}'
+      - '{{ PORT2_RABBITMQ }}:{{ PORT2_RABBITMQ }}'
+      - '{{ PORT3_RABBITMQ }}:{{ PORT3_RABBITMQ }}'
+      - '{{ PORT4_RABBITMQ }}:{{ PORT4_RABBITMQ }}'
+      - '{{ PORT5_RABBITMQ }}:{{ PORT5_RABBITMQ }}'
+      - '{{ PORT6_RABBITMQ }}:{{ PORT6_RABBITMQ }}'
+    state: started
+
+- name: Inspect {{ CONTAINER_RABBITMQ }}
+  command: docker inspect {{ CONTAINER_RABBITMQ }}
+  register: rabbitmq_ip
+  changed_when: rabbitmq_ip.rc == 0
+
+- name: Get {{ CONTAINER_RABBITMQ }} IP
+  set_fact:
+    container_ip: "{{ rabbitmq_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Waiting for rabbitmq be ready
+  uri:
+    url: 'http://{{ container_ip }}:{{ PORT6_RABBITMQ }}'
+  register: rabbitmq_ready
+  until: rabbitmq_ready.status == 200
+  retries: 120
+  delay: 3
+
+- name: Check rabbitmq users
+  command: docker exec {{ CONTAINER_RABBITMQ }} sh -c "rabbitmqctl list_users"
+  register: rabbitmq_users
+  changed_when: rabbitmq_users.rc == 0
+
+- name: Create rabbitmq user, {{ RABBITMQ_USER }}
+  command: >
+    docker exec {{ CONTAINER_RABBITMQ }} sh -c "rabbitmqctl add_user {{ RABBITMQ_USER }} {{ RABBITMQ_PASS }}"
+  when: rabbitmq_users.stdout.find(RABBITMQ_USER) == -1
+
+- name: Give permisions to {{ RABBITMQ_USER }} user
+  command: >
+    docker exec {{ CONTAINER_RABBITMQ }} sh -c 'rabbitmqctl set_permissions {{ RABBITMQ_USER }} ".*" ".*" ".*"'
+  when: rabbitmq_users.stdout.find(RABBITMQ_USER) == -1

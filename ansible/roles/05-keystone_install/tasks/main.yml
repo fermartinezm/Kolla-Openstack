@@ -1,0 +1,52 @@
+---
+- name: Show databases
+  command: docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show databases;" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: databases
+  changed_when: databases.rc == 0
+
+- name: Create {{ KEYSTONE_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ KEYSTONE_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(KEYSTONE_DB) == -1
+
+- name: Check privileges for {{ KEYSTONE_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ KEYSTONE_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ KEYSTONE_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ KEYSTONE_DB }}.* to {{ KEYSTONE_DB_USER }}@\"localhost\" identified by \"{{ KEYSTONE_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find('@localhost') == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ KEYSTONE_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ KEYSTONE_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ KEYSTONE_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ KEYSTONE_DB }}.* to {{ KEYSTONE_DB_USER }}@\"%\" identified by \"{{ KEYSTONE_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find('@%') == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ IMAGE_KEYSTONE }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/keystone'
+      pull: no
+    name: '{{ IMAGE_KEYSTONE }}'
+    source: build
+
+- name: Create {{ CONTAINER_KEYSTONE }}
+  docker_container:
+    name: '{{ CONTAINER_KEYSTONE }}'
+    image: '{{ IMAGE_KEYSTONE }}'
+    published_ports:
+      - '{{ PORT1_KEYSTONE }}:{{ PORT1_KEYSTONE }}'
+      - '{{ PORT2_KEYSTONE }}:{{ PORT2_KEYSTONE }}'
+      - '{{ PORT1_HTTPD }}:{{ PORT1_HTTPD }}'
+    state: started

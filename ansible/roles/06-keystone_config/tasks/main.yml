@@ -1,0 +1,175 @@
+---
+- name: Check if {{ CONTAINER_KEYSTONE }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Inspect {{ CONTAINER_MARIADB }}
+  command: docker inspect {{ CONTAINER_MARIADB }}
+  register: mariadb_ip
+  changed_when: mariadb_ip.rc == 0
+
+- name: Get {{ CONTAINER_MARIADB }} IP
+  set_fact:
+    mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Copy keystone.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/bck.keystone.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf'
+
+- name: Modify keystone.conf file (1)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf'
+    insertafter: '#memcache_servers = localhost:11211'
+    line: "memcache_servers = {{ memcached_ip }}:11211"
+
+- name: Modify keystone.conf file (2)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf'
+    insertafter: '#connection = <None>'
+    line: "connection = mysql+pymysql://{{ KEYSTONE_DB_USER }}:{{ KEYSTONE_DB_PASS }}@{{ mariadb_ip }}/{{ KEYSTONE_DB }}"
+
+- name: Check if keystone.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf'
+  register: keystone_conf
+
+- name: Copy keystone.conf to {{ CONTAINER_KEYSTONE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf {{ CONTAINER_KEYSTONE }}:/etc/keystone/keystone.conf
+  when: keystone_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Clean keystone.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/keystone.conf'
+  when: keystone_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Copy httpd.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/bck.httpd.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/httpd.conf'
+
+- name: Modify httpd.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/httpd.conf'
+    insertafter: '#ServerName'
+    line: "ServerName {{ HTTPD_KEYSTONE_SERVER_NAME }}"
+
+- name: Check if httpd.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/httpd.conf'
+  register: httpd_conf
+
+- name: Copy httpd.conf to {{ CONTAINER_KEYSTONE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/httpd.conf {{ CONTAINER_KEYSTONE }}:/etc/httpd/conf/httpd.conf
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Clean httpd.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/httpd.conf'
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Copy admin-openrc
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/bck.admin-openrc'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+    mode: 0600
+
+- name: Modify admin-openrc file (1)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+    insertafter: 'export OS_PASSWORD=ADMIN_PASS'
+    line: "export OS_PASSWORD={{ KEYSTONE_PASS }}"
+
+- name: Modify admin-openrc file (2)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+    insertafter: 'export OS_AUTH_URL=http://controller:5000/v3'
+    line: "export OS_AUTH_URL=http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}/v3"
+
+- name: Modify admin-openrc file (3)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+    line: 'export OS_PASSWORD=ADMIN_PASS'
+    state: absent
+
+- name: Modify admin-openrc file (4)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+    line: 'export OS_AUTH_URL=http://controller:5000/v3'
+    state: absent
+
+- name: Check if admin-openrc file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+  register: admin-openrc
+
+- name: Copy admin-openrc to {{ CONTAINER_KEYSTONE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc {{ CONTAINER_KEYSTONE }}:/root/admin-openrc
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Clean admin-openrc
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/06-keystone_config/templates/admin-openrc'
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Populate keystone database
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'su -s /bin/bash keystone -c "keystone-manage db_sync"'
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Initialize Fernet keys (1)
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'keystone-manage fernet_setup --keystone-user {{ KEYSTONE_USER }} --keystone-group {{ KEYSTONE_GROUP }}'
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Initialize Fernet keys (2)
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'keystone-manage credential_setup --keystone-user {{ KEYSTONE_USER }} --keystone-group {{ KEYSTONE_GROUP }}'
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Bootstrap keystone service
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'keystone-manage bootstrap --bootstrap-password {{ KEYSTONE_PASS }} --bootstrap-admin-url http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}/v3/ --bootstrap-internal-url http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}/v3/ --bootstrap-public-url http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}/v3/ --bootstrap-region-id RegionOne'
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Check if /usr/share/keystone/wsgi-keystone.conf exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'test -f /etc/httpd/conf.d/wsgi-keystone.conf'
+  register: symlink
+  changed_when: symlink.rc == 0
+  ignore_errors: yes
+
+- name: Create a link to /usr/share/keystone/wsgi-keystone.conf
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'ln -s /usr/share/keystone/wsgi-keystone.conf /etc/httpd/conf.d/'
+  when: symlink.rc == 1
+
+- name: Restart {{ CONTAINER_KEYSTONE }}
+  command: >
+    docker restart {{ CONTAINER_KEYSTONE }}
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1

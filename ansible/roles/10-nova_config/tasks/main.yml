@@ -1,0 +1,233 @@
+---
+- name: Check if {{ CONTAINER_NOVA }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Inspect {{ CONTAINER_MARIADB }}
+  command: docker inspect {{ CONTAINER_MARIADB }}
+  register: mariadb_ip
+  changed_when: mariadb_ip.rc == 0
+
+- name: Get {{ CONTAINER_MARIADB }} IP
+  set_fact:
+    mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_RABBITMQ }}
+  command: docker inspect {{ CONTAINER_RABBITMQ }}
+  register: rabbitmq_ip
+  changed_when: rabbitmq_ip.rc == 0
+
+- name: Get {{ CONTAINER_RABBITMQ }} IP
+  set_fact:
+    rabbitmq_ip: "{{ rabbitmq_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_GLANCE }}
+  command: docker inspect {{ CONTAINER_GLANCE }}
+  register: glance_ip
+  changed_when: glance_ip.rc == 0
+
+- name: Get {{ CONTAINER_GLANCE }} IP
+  set_fact:
+    glance_ip: "{{ glance_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_NOVA }}
+  command: docker inspect {{ CONTAINER_NOVA }}
+  register: nova_ip
+  changed_when: nova_ip.rc == 0
+
+- name: Get {{ CONTAINER_NOVA }} IP
+  set_fact:
+    nova_ip: "{{ nova_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Copy nova.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/bck.nova.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    owner: root
+    mode: 0640
+
+- name: Add rabbitmq url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    insertafter: '#transport_url = rabbit://user:pass@ip'
+    line: "transport_url = rabbit://{{ RABBITMQ_USER }}:{{ RABBITMQ_PASS }}@{{ rabbitmq_ip }}"
+
+- name: Add glance url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    insertafter: '#api_servers = http://ip:9292'
+    line: "api_servers = http://{{ glance_ip }}:{{ PORT_GLANCE }}"
+
+- name: Add nova_api url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    insertafter: '#connection = nova_api'
+    line: "connection = mysql+pymysql://{{ NOVA_USER }}:{{ NOVA_PASS }}@{{ mariadb_ip }}/{{ NOVA_API_DB }}"
+
+- name: Add nova url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    insertafter: '#connection = nova_db'
+    line: "connection = mysql+pymysql://{{ NOVA_USER }}:{{ NOVA_PASS }}@{{ mariadb_ip }}/{{ NOVA_DB }}"
+
+- name: Add placement url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    insertafter: '#connection = nova_placement'
+    line: "connection = mysql+pymysql://{{ NOVA_USER }}:{{ NOVA_PASS }}@{{ mariadb_ip }}/{{ NOVA_PLACEMENT_DB }}"
+
+- name: Add keystone_authtoken section to nova.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [keystone_authtoken]
+      www_authenticate_uri = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      memcached_servers = {{ memcached_ip }}:{{ PORT_MEMCACHED }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ NOVA_USER }}
+      password = {{ NOVA_PASS }}
+
+- name: Add placement section to nova.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [placement]
+      auth_url = http://{{ keystone_ip }}:5000
+      os_region_name = RegionOne
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ PLACEMENT_USER }}
+      password = {{ PLACEMENT_PASS }}
+
+- name: Check if nova.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+  register: nova_conf
+
+- name: Copy nova.conf to {{ CONTAINER_NOVA }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf {{ CONTAINER_NOVA }}:/etc/nova/nova.conf
+  when: nova_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Clean nova.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/nova.conf'
+  when: nova_conf.stat.exists and containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Copy httpd.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/bck.httpd.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/httpd.conf'
+
+- name: Modify httpd.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/httpd.conf'
+    insertafter: '#ServerName'
+    line: "ServerName {{ HTTPD_NOVA_SERVER_NAME }}"
+
+- name: Check if httpd.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/httpd.conf'
+  register: httpd_conf
+
+- name: Copy httpd.conf to {{ CONTAINER_NOVA }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/httpd.conf {{ CONTAINER_NOVA }}:/etc/httpd/conf/httpd.conf
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Clean httpd.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/httpd.conf'
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Check if 00-nova-placement-api.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/00-nova-placement-api.conf'
+  register: nova_placement
+
+- name: Copy 00-nova-placement-api.conf to {{ CONTAINER_NOVA }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/10-nova_config/templates/00-nova-placement-api.conf {{ CONTAINER_NOVA }}:/etc/httpd/conf.d/00-nova-placement-api.conf
+  when: nova_placement.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Change permisssions on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'chmod 640 /etc/nova/nova.conf '
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Change owner/group on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'chown root:nova /etc/nova/nova.conf'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Populate nova database
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage api_db sync"'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Map cell
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage cell_v2 map_cell0"'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Populate nova database (2)
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage db sync"'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Check if cell1 already exists
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage cell_v2 list_cells"'
+  register: cell1_exists
+  changed_when: cell1_exists.rc == 0
+
+- name: Populate nova database
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage cell_v2 create_cell --name cell1"'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1 and cell1_exists.stdout.find('cell1') == -1
+
+- name: Restart {{ CONTAINER_KEYSTONE }}
+  command: >
+    docker restart {{ CONTAINER_KEYSTONE }}
+  when: containers.stdout.find(CONTAINER_KEYSTONE) != -1
+
+- name: Restart {{ CONTAINER_NOVA }}
+  command: >
+    docker restart {{ CONTAINER_NOVA }}
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Change permissions to nova-placement-api.log
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'chown nova:nova /var/log/nova/nova-placement-api.log '
+  when: containers.stdout.find(CONTAINER_NOVA) != -1

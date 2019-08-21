@@ -1,0 +1,160 @@
+---
+- name: Check if {{ CONTAINER_GLANCE }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Inspect {{ CONTAINER_MARIADB }}
+  command: docker inspect {{ CONTAINER_MARIADB }}
+  register: mariadb_ip
+  changed_when: mariadb_ip.rc == 0
+
+- name: Get {{ CONTAINER_MARIADB }} IP
+  set_fact:
+    mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Copy glance-api.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/bck.glance-api.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-api.conf'
+    owner: root
+    mode: 0640
+
+- name: Modify glance-api.conf file (1)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-api.conf'
+    insertafter: '#connection = <None>'
+    line: "connection = mysql+pymysql://{{ GLANCE_DB_USER }}:{{ GLANCE_DB_PASS }}@{{ mariadb_ip }}/{{ GLANCE_DB }}"
+
+- name: Modify glance-api.conf file (2)
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-api.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [keystone_authtoken]
+      www_authenticate_uri = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      memcache_servers = {{ memcached_ip }}:{{ PORT_MEMCACHED }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ GLANCE_USER }}
+      password = {{ GLANCE_PASS }}
+
+- name: Copy glance-registry.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/bck.glance-registry.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf'
+    owner: root
+    mode: 0640
+
+- name: Modify glance-registry.conf file (1)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf'
+    insertafter: '#connection = <None>'
+    line: "connection = mysql+pymysql://{{ GLANCE_DB_USER }}:{{ GLANCE_DB_PASS }}@{{ mariadb_ip }}/{{ GLANCE_DB }}"
+
+- name: Modify glance-registry.conf file (2)
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [keystone_authtoken]
+      www_authenticate_uri = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      memcache_servers = {{ memcached_ip }}:{{ PORT_MEMCACHED }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ GLANCE_USER }}
+      password = {{ GLANCE_PASS }}
+
+- name: Check if glance-registry.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf'
+  register: glance_registry
+
+- name: Copy glance-registry.conf to {{ CONTAINER_GLANCE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf {{ CONTAINER_GLANCE }}:/etc/glance/glance-registry.conf
+  when: glance_registry.stat.exists and containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Clean glance-registry.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-registry.conf'
+  when: glance_registry.stat.exists and containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Change owner/group on glance-registry.conf
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'chown root:glance /etc/glance/glance-registry.conf'
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Check if glance-api.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-api.conf'
+  register: glance_api
+
+- name: Copy glance-api.conf to {{ CONTAINER_GLANCE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates/glance-api.conf {{ CONTAINER_GLANCE }}:/etc/glance/glance-api.conf
+  when: glance_api.stat.exists and containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Clean glance-api.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/08-glance_config/templates//glance-api.conf'
+  when: glance_api.stat.exists and containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Change permisssions on glance-api.conf
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'chmod 640 /etc/glance/glance-api.conf '
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Change owner/group on glance-api.conf
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'chown root:glance /etc/glance/glance-api.conf'
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Change owner/group on /var/log/glance/api.log
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'chown glance:glance /var/log/glance/api.log'
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Change owner/group on /var/log/glance/registry.log
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'chown glance:glance /var/log/glance/registry.log'
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Populate glance database
+  command: >
+    docker exec {{ CONTAINER_GLANCE }} sh -c 'su -s /bin/bash glance -c "glance-manage db_sync"'
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+
+- name: Restart {{ CONTAINER_GLANCE }}
+  command: >
+    docker restart {{ CONTAINER_GLANCE }}
+  when: containers.stdout.find(CONTAINER_GLANCE) != -1
+

@@ -1,0 +1,84 @@
+---
+- name: Create {{ IMAGE_MARIADB }} image
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/mariadb/'
+      pull: no
+    name: '{{ IMAGE_MARIADB }}'
+    source: build
+
+- name: Create {{ CONTAINER_MARIADB }}
+  docker_container:
+    name: '{{ CONTAINER_MARIADB }}'
+    image: '{{ IMAGE_MARIADB }}'
+    published_ports: '{{ PORT_MARIADB }}:{{ PORT_MARIADB }}'
+    volumes:
+      - '{{ PROJECT_PATH }}/volumes/mysql:/var/lib/mysql'
+    state: started
+
+- name: Check if {{ CONTAINER_MARIADB }} has been created
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Start {{ CONTAINER_MARIADB }}
+  command: >
+    docker start {{ CONTAINER_MARIADB }}
+  when: containers.stdout.find(CONTAINER_MARIADB) != -1
+
+- name: Inspect {{ CONTAINER_MARIADB }}
+  command: docker inspect {{ CONTAINER_MARIADB }}
+  register: mariadb_ip
+  changed_when: mariadb_ip.rc == 0
+
+- name: Get {{ CONTAINER_MARIADB }} IP
+  set_fact:
+    mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Wait for mariadb be ready
+  command: >
+    curl http://{{ mariadb_ip }}:{{ PORT_MARIADB }}
+    warn: false
+  register: secure_install
+  changed_when: secure_install.rc == 56
+  until: secure_install.rc == 56
+  retries: 30
+  delay: 3
+  ignore_errors: true
+
+- name: Check grants for 'root'@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"root\"@\"localhost\";"'
+  register: secure_install
+  changed_when: secure_install.rc == 0
+  ignore_errors: true
+
+- name: Change root password
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "SET PASSWORD FOR \"root\"@\"localhost\" = PASSWORD(\"{{ MARIADB_ROOT_PASS }}\")"'
+  when: secure_install.rc == 0
+
+- name: Remove root remote access to {{ CONTAINER_MARIADB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c "mysql -e \"delete from mysql.user WHERE User='root' and Host not in ('localhost', '127.0.0.1', '::1');\" -u root -p{{ MARIADB_ROOT_PASS }}"
+  when: secure_install.rc == 0
+
+- name: Delete {{ CONTAINER_MARIADB }} annonymous users for localhost
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c "mysql -e \"drop user if exists ''@'localhost';\" -u root -p{{ MARIADB_ROOT_PASS }}"
+  when: secure_install.rc == 0
+
+- name: Delete {{ CONTAINER_MARIADB }} annonymous users for all hosts
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c "mysql -e \"drop user if exists ''@'%';\" -u root -p{{ MARIADB_ROOT_PASS }}"
+  when: secure_install.rc == 0
+
+- name: Delete test database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c "mysql -e 'drop database if exists test;' -u root -p{{ MARIADB_ROOT_PASS }}"
+  when: secure_install.rc == 0
+
+- name: Reload privileges
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c "mysql -e 'flush privileges;' -u root -p{{ MARIADB_ROOT_PASS }}"
+  when: secure_install.rc == 0

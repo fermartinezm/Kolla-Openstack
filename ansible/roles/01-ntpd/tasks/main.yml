@@ -1,0 +1,15 @@
+---
+- name: Create ntpd image
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/ntpd'
+      pull: no
+    name: '{{ IMAGE_NTPD }}'
+    source: build
+
+- name: Create ntpd container
+  docker_container:
+    name: '{{ CONTAINER_NTPD }}'
+    image: '{{ IMAGE_NTPD }}'
+    published_ports: '{{ PORT_NTPD }}:{{ PORT_NTPD }}/udp'
+    state: started

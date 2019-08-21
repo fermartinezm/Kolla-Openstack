@@ -1,0 +1,263 @@
+---
+- name: Show databases
+  command: docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show databases;" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: databases
+  changed_when: databases.rc == 0
+
+- name: Create {{ NOVA_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ NOVA_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(NOVA_DB) == -1
+
+- name: Var needed to check {{ NOVA_DB }} grants
+  set_fact:
+    grants: '`{{ NOVA_DB }}`.*'
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_DB }}.* to {{ NOVA_DB_USER }}@\"localhost\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find(grants) == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'%' for {{ NOVA_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'%' for {{ NOVA_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_DB }}.* to {{ NOVA_DB_USER }}@\"%\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find(grants) == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ NOVA_API_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ NOVA_API_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(NOVA_API_DB) == -1
+
+- name: Var needed to check {{ NOVA_API_DB }} grants
+  set_fact:
+    grants: '`{{ NOVA_API_DB }}`.*'
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_API_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_API_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_API_DB }}.* to {{ NOVA_DB_USER }}@\"localhost\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find(grants) == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'%' for {{ NOVA_API_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'%' for {{ NOVA_API_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_API_DB }}.* to {{ NOVA_DB_USER }}@\"%\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find(grants) == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ NOVA_CELL0_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ NOVA_CELL0_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(NOVA_CELL0_DB) == -1
+
+- name: Var needed to check {{ NOVA_CELL0_DB }} grants
+  set_fact:
+    grants: '`{{ NOVA_CELL0_DB }}`.*'
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_CELL0_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_CELL0_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_CELL0_DB }}.* to {{ NOVA_DB_USER }}@\"localhost\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find(grants) == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'%' for {{ NOVA_CELL0_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'%' for {{ NOVA_CELL0_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_CELL0_DB }}.* to {{ NOVA_DB_USER }}@\"%\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find(grants) == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ NOVA_PLACEMENT_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ NOVA_PLACEMENT_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(NOVA_PLACEMENT_DB) == -1
+
+- name: Var needed to check {{ NOVA_PLACEMENT_DB }} grants
+  set_fact:
+    grants: '`{{ NOVA_PLACEMENT_DB }}`.*'
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_PLACEMENT_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'localhost' for {{ NOVA_PLACEMENT_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_PLACEMENT_DB }}.* to {{ NOVA_DB_USER }}@\"localhost\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find(grants) == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ NOVA_DB_USER }}@'%' for {{ NOVA_PLACEMENT_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NOVA_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NOVA_DB_USER }}@'%' for {{ NOVA_PLACEMENT_DB }}
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NOVA_PLACEMENT_DB }}.* to {{ NOVA_DB_USER }}@\"%\" identified by \"{{ NOVA_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find(grants) == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ IMAGE_NOVA }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/nova'
+      pull: no
+    name: '{{ IMAGE_NOVA }}'
+    source: build
+
+- name: Create {{ CONTAINER_NOVA }}
+  docker_container:
+    name: '{{ CONTAINER_NOVA }}'
+    image: '{{ IMAGE_NOVA }}'
+    published_ports:
+      - '{{ PORT1_NOVA }}:{{ PORT1_NOVA }}'
+      - '{{ PORT2_NOVA }}:{{ PORT2_NOVA }}'
+      - '{{ PORT3_NOVA }}:{{ PORT3_NOVA }}'
+      - '{{ PORT4_NOVA }}:{{ PORT4_NOVA }}'
+      - '{{ PORT5_NOVA }}:{{ PORT5_NOVA }}'
+      - '{{ PORT6_NOVA }}:{{ PORT6_NOVA }}'
+      - '{{ PORT2_HTTPD }}:{{ PORT1_HTTPD }}'
+    state: started
+
+- name: Check if {{ NOVA_USER }} user already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user list'
+  register: user_list
+
+- name: Create {{ NOVA_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user create --domain default --project service --password {{ NOVA_PASS }} {{ NOVA_USER }}'
+  when: user_list.stdout.find(NOVA_USER) == -1
+
+- name: Check if {{ NOVA_USER }} user has admin role
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role assignment list --names'
+  register: role_asssignment
+
+- name: Add admin role to {{ NOVA_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role add --project service --user {{ NOVA_USER }} admin'
+  when: role_asssignment.stdout.find(NOVA_USER) == -1
+
+- name: Check if {{ NOVA_SERVICE_NAME }} service already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service list'
+  register: service
+
+- name: Create {{ NOVA_SERVICE_NAME }} service
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ NOVA_SERVICE_NAME }} --description "OpenStack Image" compute'
+  when: service.stdout.find(NOVA_SERVICE_NAME) == -1
+
+- name: Check if {{ PLACEMENT_USER }} user already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user list'
+  register: user_list
+
+- name: Create {{ PLACEMENT_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user create --domain default --project service --password {{ PLACEMENT_PASS }} {{ PLACEMENT_USER }}'
+  when: user_list.stdout.find(PLACEMENT_USER) == -1
+
+- name: Check if {{ PLACEMENT_USER }} user has admin role
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role assignment list --names'
+  register: role_asssignment
+
+- name: Add admin role to {{ PLACEMENT_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role add --project service --user {{ PLACEMENT_USER }} admin'
+  when: role_asssignment.stdout.find(PLACEMENT_USER) == -1
+
+- name: Check if {{ PLACEMENT_SERVICE_NAME }} service already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service list'
+  register: service
+
+- name: Create {{ PLACEMENT_SERVICE_NAME }} service
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ PLACEMENT_SERVICE_NAME }} --description "OpenStack Image" placement'
+  when: service.stdout.find(PLACEMENT_SERVICE_NAME) == -1
+
+- name: Inspect {{ CONTAINER_NOVA }}
+  command: docker inspect {{ CONTAINER_NOVA }}
+  register: nova_ip
+  changed_when: nova_ip.rc == 0
+
+- name: Get {{ CONTAINER_NOVA }} IP
+  set_fact:
+    nova_ip: "{{ nova_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Check if {{ NOVA_SERVICE_NAME }} and {{ PLACEMENT_SERVICE_NAME }} endpoints already exist
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint list'
+  register: endpoints
+
+- name: Create {{ NOVA_SERVICE_NAME }} public endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute public http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+  when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
+
+- name: Create {{ NOVA_SERVICE_NAME }} internal endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute internal http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+  when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
+
+- name: Create {{ NOVA_SERVICE_NAME }} admin endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute admin http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+  when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
+
+- name: Create {{ PLACEMENT_SERVICE_NAME }} public endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne placement public http://{{ nova_ip }}:{{ PORT6_NOVA }}'
+  when: endpoints.stdout.find(PLACEMENT_SERVICE_NAME) == -1
+
+- name: Create {{ PLACEMENT_SERVICE_NAME }} internal endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne placement internal http://{{ nova_ip }}:{{ PORT6_NOVA }}'
+  when: endpoints.stdout.find(PLACEMENT_SERVICE_NAME) == -1
+
+- name: Create {{ PLACEMENT_SERVICE_NAME }} admin endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne placement admin http://{{ nova_ip }}:{{ PORT6_NOVA }}'
+  when: endpoints.stdout.find(PLACEMENT_SERVICE_NAME) == -1

@@ -1,0 +1,50 @@
+---
+- hosts: hosts
+  become: true
+  roles:
+    - 01-ntpd
+
+- hosts: hosts
+  become: true
+  roles:
+    - 02-memcached
+
+- hosts: hosts
+  become: true
+  roles:
+    - 03-rabbitmq
+
+- hosts: hosts
+  become: true
+  roles:
+    - 04-mariadb
+
+- hosts: hosts
+  become: true
+  roles:
+    - 05-keystone_install
+
+- hosts: hosts
+  become: true
+  roles:
+    - 06-keystone_config
+
+- hosts: hosts
+  become: true
+  roles:
+    - 07-glance_install
+
+- hosts: hosts
+  become: true
+  roles:
+    - 08-glance_config
+
+- hosts: hosts
+  become: true
+  roles:
+    - 09-nova_install
+
+- hosts: hosts
+  become: true
+  roles:
+    - 10-nova_config

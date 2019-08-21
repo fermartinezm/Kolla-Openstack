@@ -1,0 +1,16 @@
+---
+- name: Create memcached image
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/memcached'
+      pull: no
+    name: '{{ IMAGE_MEMCACHED }}'
+    source: build
+
+- name: Create memcached container
+  docker_container:
+    name: '{{ CONTAINER_MEMCACHED }}'
+    image: '{{ IMAGE_MEMCACHED }}'
+    published_ports: '{{ PORT_MEMCACHED }}:{{ PORT_MEMCACHED }}'
+    state: started
+
