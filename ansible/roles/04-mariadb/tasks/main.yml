@@ -38,10 +38,8 @@
 - name: Wait for mariadb be ready
   command: >
     curl http://{{ mariadb_ip }}:{{ PORT_MARIADB }}
-    warn: false
   register: secure_install
-  changed_when: secure_install.rc == 56
-  until: secure_install.rc == 56
+  until: secure_install.rc != 7
   retries: 30
   delay: 3
   ignore_errors: true
