@@ -48,3 +48,8 @@
   become: true
   roles:
     - 10-nova_config
+
+- hosts: hosts
+  become: true
+  roles:
+    - 11-nova_compute

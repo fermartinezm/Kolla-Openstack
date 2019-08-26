@@ -234,17 +234,17 @@
 
 - name: Create {{ NOVA_SERVICE_NAME }} public endpoint
   command: >
-    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute public http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute public http://{{ nova_ip }}:{{ PORT4_NOVA }}/v2.1/%\(tenant_id\)s'
   when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
 
 - name: Create {{ NOVA_SERVICE_NAME }} internal endpoint
   command: >
-    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute internal http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute internal http://{{ nova_ip }}:{{ PORT4_NOVA }}/v2.1/%\(tenant_id\)s'
   when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
 
 - name: Create {{ NOVA_SERVICE_NAME }} admin endpoint
   command: >
-    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute admin http://{{ nova_ip }}:{{ PORT4_NOVA }}'
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne compute admin http://{{ nova_ip }}:{{ PORT4_NOVA }}/v2.1/%\(tenant_id\)s'
   when: endpoints.stdout.find(NOVA_SERVICE_NAME) == -1
 
 - name: Create {{ PLACEMENT_SERVICE_NAME }} public endpoint

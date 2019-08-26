@@ -1,0 +1,174 @@
+---
+- name: Create {{ IMAGE_NOVA_COMPUTE }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/nova-compute'
+      pull: no
+    name: '{{ IMAGE_NOVA_COMPUTE }}'
+    source: build
+
+- name: Create {{ CONTAINER_NOVA_COMPUTE }}
+  docker_container:
+    name: '{{ CONTAINER_NOVA_COMPUTE }}'
+    image: '{{ IMAGE_NOVA_COMPUTE }}'
+    published_ports: '{{ PORT_START_NOVA_COMPUTE }}-{{ PORT_END_NOVA_COMPUTE }}:{{ PORT_START_NOVA_COMPUTE }}-{{ PORT_END_NOVA_COMPUTE }}'
+    state: started
+
+- name: Check if {{ CONTAINER_NOVA_COMPUTE }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Inspect {{ CONTAINER_RABBITMQ }}
+  command: docker inspect {{ CONTAINER_RABBITMQ }}
+  register: rabbitmq_ip
+  changed_when: rabbitmq_ip.rc == 0
+
+- name: Get {{ CONTAINER_RABBITMQ }} IP
+  set_fact:
+    rabbitmq_ip: "{{ rabbitmq_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_GLANCE }}
+  command: docker inspect {{ CONTAINER_GLANCE }}
+  register: glance_ip
+  changed_when: glance_ip.rc == 0
+
+- name: Get {{ CONTAINER_GLANCE }} IP
+  set_fact:
+    glance_ip: "{{ glance_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_NOVA }}
+  command: docker inspect {{ CONTAINER_NOVA }}
+  register: nova_ip
+  changed_when: nova_ip.rc == 0
+
+- name: Get {{ CONTAINER_NOVA }} IP
+  set_fact:
+    nova_ip: "{{ nova_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_NOVA_COMPUTE }}
+  command: docker inspect {{ CONTAINER_NOVA_COMPUTE }}
+  register: nova_compute_ip
+  changed_when: nova_compute_ip.rc == 0
+
+- name: Get {{ CONTAINER_NOVA_COMPUTE }} IP
+  set_fact:
+    nova_compute_ip: "{{ nova_compute_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Copy nova.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/bck.nova.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    owner: root
+    mode: 0640
+
+- name: Add rabbitmq url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    insertafter: '#transport_url = rabbit://user:pass@ip'
+    line: "transport_url = rabbit://{{ RABBITMQ_USER }}:{{ RABBITMQ_PASS }}@{{ rabbitmq_ip }}"
+
+- name: Add glance url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    insertafter: '#api_servers = http://ip:9292'
+    line: "api_servers = http://{{ glance_ip }}:{{ PORT_GLANCE }}"
+
+- name: Add server_proxyclient_address to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    insertafter: '#server_proxyclient_address = my_ip'
+    line: "server_proxyclient_address = {{ nova_compute_ip }}"
+
+- name: Add novncproxy_base_url to nova.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    insertafter: '#novncproxy_base_url = http://ip'
+    line: "novncproxy_base_url = http://{{ nova_ip }}:{{ PORT1_NOVA }}/vnc_auto.html"
+
+- name: Add keystone_authtoken section to nova.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [keystone_authtoken]
+      www_authenticate_uri = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      memcached_servers = {{ memcached_ip }}:{{ PORT_MEMCACHED }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ NOVA_USER }}
+      password = {{ NOVA_PASS }}
+
+- name: Add placement section to nova.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [placement]
+      auth_url = http://{{ keystone_ip }}:5000
+      os_region_name = RegionOne
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ PLACEMENT_USER }}
+      password = {{ PLACEMENT_PASS }}
+
+- name: Check if nova.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+  register: nova_conf
+
+- name: Copy nova.conf to {{ CONTAINER_NOVA_COMPUTE }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf {{ CONTAINER_NOVA_COMPUTE }}:/etc/nova/nova.conf
+  when: nova_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA_COMPUTE) != -1
+
+- name: Clean nova.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/11-nova_compute/templates/nova.conf'
+  when: nova_conf.stat.exists
+
+- name: Change permisssions on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA_COMPUTE }} sh -c 'chmod 640 /etc/nova/nova.conf '
+  when: containers.stdout.find(CONTAINER_NOVA_COMPUTE) != -1
+
+- name: Change owner/group on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA_COMPUTE }} sh -c 'chown root:nova /etc/nova/nova.conf'
+  when: containers.stdout.find(CONTAINER_NOVA_COMPUTE) != -1
+
+- name: Restart {{ CONTAINER_NOVA_COMPUTE }}
+  command: >
+    docker restart {{ CONTAINER_NOVA_COMPUTE }}
+  when: containers.stdout.find(CONTAINER_NOVA_COMPUTE) != -1
+
+- name: Discover host
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage cell_v2 discover_hosts"'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
