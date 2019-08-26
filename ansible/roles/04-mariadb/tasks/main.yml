@@ -36,10 +36,10 @@
     mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
 
 - name: Wait for mariadb be ready
-  command: >
-    curl http://{{ mariadb_ip }}:{{ PORT_MARIADB }}
+  uri:
+    url: http://{{ mariadb_ip }}:{{ PORT_MARIADB }}
   register: secure_install
-  until: secure_install.rc != 7
+  until: secure_install.msg.find('Errno 111') == -1
   retries: 30
   delay: 3
   ignore_errors: true
