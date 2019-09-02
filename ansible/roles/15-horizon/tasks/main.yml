@@ -1,0 +1,136 @@
+---
+- name: Create {{ IMAGE_HORIZON }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/horizon'
+      pull: no
+    name: '{{ IMAGE_HORIZON }}'
+    source: build
+
+- name: Create {{ CONTAINER_HORIZON }}
+  docker_container:
+    name: '{{ CONTAINER_HORIZON }}'
+    image: '{{ IMAGE_HORIZON }}'
+    published_ports: '{{ PORT3_HTTPD }}:{{ PORT1_HTTPD }}'
+    state: started
+    privileged: yes
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Check if {{ CONTAINER_HORIZON }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Copy httpd.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/bck.httpd.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/httpd.conf'
+
+- name: Modify httpd.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/httpd.conf'
+    insertafter: '#ServerName'
+    line: "ServerName {{ HTTPD_HORIZON_SERVER_NAME }}"
+
+- name: Check if httpd.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/httpd.conf'
+  register: httpd_conf
+
+- name: Copy httpd.conf to {{ CONTAINER_HORIZON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/httpd.conf {{ CONTAINER_HORIZON }}:/etc/httpd/conf/httpd.conf
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Clean httpd.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/httpd.conf'
+  when: httpd_conf.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Copy openstack-dashboard.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/bck.openstack-dashboard.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/openstack-dashboard.conf'
+
+- name: Check if openstack-dashboard.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/openstack-dashboard.conf'
+  register: openstack_dashboard_conf
+
+- name: Copy openstack-dashboard.conf to {{ CONTAINER_HORIZON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/openstack-dashboard.conf {{ CONTAINER_HORIZON }}:/etc/httpd/conf.d/openstack-dashboard.conf
+  when: openstack_dashboard_conf.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Clean openstack-dashboard.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/openstack-dashboard.conf'
+  when: openstack_dashboard_conf.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Copy local_settings
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/bck.local_settings'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+
+- name: Check if local_settings file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+  register: local_settings
+
+- name: Add allowed hosts to local_settings file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+    insertafter: '# ALLOWED_HOSTS = ip'
+    line: "ALLOWED_HOSTS = ['localhost', '{{ keystone_ip }}']"
+
+- name: Add memcached ip to local_settings file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+    insertafter: '# LOCATION: ip'
+    line: "        'LOCATION': '{{ memcached_ip }}:11211',"
+
+- name: Add keystone ip to local_settings file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+    insertafter: '# OPENSTACK_HOST = ip'
+    line: 'OPENSTACK_HOST = "{{ keystone_ip }}"'
+
+- name: Copy local_settings file to {{ CONTAINER_HORIZON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings {{ CONTAINER_HORIZON }}:/etc/openstack-dashboard/local_settings
+  when: local_settings.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Clean local_settings
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
+  when: local_settings.stat.exists and containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Change permisssions on local_settings
+  command: >
+    docker exec {{ CONTAINER_HORIZON }} sh -c 'chgrp apache /etc/openstack-dashboard/local_settings'
+  when: containers.stdout.find(CONTAINER_HORIZON) != -1
+
+- name: Start httpd service
+  command: >
+    docker exec {{ CONTAINER_HORIZON }} sh -c 'touch start_httpd'
+  when: containers.stdout.find(CONTAINER_HORIZON) != -1

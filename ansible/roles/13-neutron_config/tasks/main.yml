@@ -1,0 +1,420 @@
+---
+- name: Check if {{ CONTAINER_NEUTRON }} exits
+  command: docker ps -a
+  register: containers
+  changed_when: containers.rc == 0
+
+- name: Inspect {{ CONTAINER_MARIADB }}
+  command: docker inspect {{ CONTAINER_MARIADB }}
+  register: mariadb_ip
+  changed_when: mariadb_ip.rc == 0
+
+- name: Get {{ CONTAINER_MARIADB }} IP
+  set_fact:
+    mariadb_ip: "{{ mariadb_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_RABBITMQ }}
+  command: docker inspect {{ CONTAINER_RABBITMQ }}
+  register: rabbitmq_ip
+  changed_when: rabbitmq_ip.rc == 0
+
+- name: Get {{ CONTAINER_RABBITMQ }} IP
+  set_fact:
+    rabbitmq_ip: "{{ rabbitmq_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_MEMCACHED }}
+  command: docker inspect {{ CONTAINER_MEMCACHED }}
+  register: memcached_ip
+  changed_when: memcached_ip.rc == 0
+
+- name: Get {{ CONTAINER_MEMCACHED }} IP
+  set_fact:
+    memcached_ip: "{{ memcached_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_KEYSTONE }}
+  command: docker inspect {{ CONTAINER_KEYSTONE }}
+  register: keystone_ip
+  changed_when: keystone_ip.rc == 0
+
+- name: Get {{ CONTAINER_KEYSTONE }} IP
+  set_fact:
+    keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Inspect {{ CONTAINER_NOVA }}
+  command: docker inspect {{ CONTAINER_NOVA }}
+  register: nova_ip
+  changed_when: nova_ip.rc == 0
+
+- name: Get {{ CONTAINER_NOVA }} IP
+  set_fact:
+    nova_ip: "{{ nova_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Copy neutron.conf
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.neutron.conf'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+    owner: root
+    mode: 0640
+
+- name: Add rabbitmq url to neutron.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+    insertafter: '#transport_url = rabbit://user:pass@ip'
+    line: "transport_url = rabbit://{{ RABBITMQ_USER }}:{{ RABBITMQ_PASS }}@{{ rabbitmq_ip }}"
+
+- name: Add neutron db url to neutron.conf file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+    insertafter: '#connection = neutron'
+    line: "connection = mysql+pymysql://{{ NEUTRON_USER }}:{{ NEUTRON_PASS }}@{{ mariadb_ip }}/{{ NEUTRON_DB }}"
+
+- name: Add keystone_authtoken section to neutron.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [keystone_authtoken]
+      www_authenticate_uri = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      memcached_servers = {{ memcached_ip }}:{{ PORT_MEMCACHED }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ NEUTRON_USER }}
+      password = {{ NEUTRON_PASS }}
+
+- name: Add nova section to neutron.conf file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [nova]
+      region_name = RegionOne
+      auth_url = http://{{ keystone_ip }}:5000
+      auth_type = password
+      region_name = RegionOne
+      project_domain_name = default
+      user_domain_name = default
+      project_name = service
+      username = {{ NOVA_USER }}
+      password = {{ NOVA_PASS }}
+
+- name: Check if neutron.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+  register: neutron_conf
+
+- name: Copy neutron.conf to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf {{ CONTAINER_NEUTRON }}:/etc/neutron/neutron.conf
+  when: neutron_conf.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean neutron.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/neutron.conf'
+  when: neutron_conf.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy l3_agent.ini
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.l3_agent.ini'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/l3_agent.ini'
+    owner: root
+    mode: 0640
+
+- name: Add interface driver to l3_agent.ini file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/l3_agent.ini'
+    insertafter: EOF
+    line: 'interface_driver = openvswitch'
+
+- name: Check if l3_agent.ini file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/l3_agent.ini'
+  register: l3_agent
+
+- name: Copy l3_agent.ini to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/l3_agent.ini {{ CONTAINER_NEUTRON }}:/etc/neutron/l3_agent.ini
+  when: l3_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean l3_agent.ini 
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/l3_agent.ini'
+  when: l3_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy dhcp_agent.ini
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.dhcp_agent.ini'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/dhcp_agent.ini'
+    owner: root
+    mode: 0640
+
+- name: Modify dhcp_agent.ini file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/dhcp_agent.ini'
+    marker: ''
+    insertafter: EOF
+    block: |
+      interface_driver = openvswitch
+      dhcp_driver = neutron.agent.linux.dhcp.Dnsmasq
+      enable_isolated_metadata = true
+
+- name: Check if dhcp_agent.ini file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/dhcp_agent.ini'
+  register: dhcp_agent
+
+- name: Copy dhcp_agent.ini to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/dhcp_agent.ini {{ CONTAINER_NEUTRON }}:/etc/neutron/dhcp_agent.ini
+  when: dhcp_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean dhcp_agent.ini
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/dhcp_agent.ini'
+  when: dhcp_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy ml2_conf.ini
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.ml2_conf.ini'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/ml2_conf.ini'
+    owner: root
+    mode: 0640
+
+- name: Add ml2 section to ml2_conf.ini file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/ml2_conf.ini'
+    marker: ''
+    insertbefore: EOF
+    block: |
+      [ml2]
+      type_drivers = flat,vlan,gre,vxlan
+      tenant_network_types =
+      mechanism_drivers = openvswitch
+      extension_drivers = port_security
+
+- name: Check if ml2_conf.ini file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/ml2_conf.ini'
+  register: ml2_conf
+
+- name: Copy ml2_conf.ini to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/ml2_conf.ini {{ CONTAINER_NEUTRON }}:/etc/neutron/plugins/ml2/ml2_conf.ini
+  when: ml2_conf.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean ml2_conf.ini
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/ml2_conf.ini'
+  when: ml2_conf.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy openvswitch_agent.ini
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.openvswitch_agent.ini'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/openvswitch_agent.ini'
+    owner: root
+    mode: 0640
+
+- name: Add securitygroup section to openvswitch_agent.ini file
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/openvswitch_agent.ini'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [securitygroup]
+      firewall_driver = openvswitch
+      enable_security_group = true
+      enable_ipset = true
+
+- name: Check if openvswitch_agent.ini file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/openvswitch_agent.ini'
+  register: openvswitch_agent
+
+- name: Copy openvswitch_agent.ini to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/openvswitch_agent.ini {{ CONTAINER_NEUTRON }}:/etc/neutron/plugins/ml2/openvswitch_agent.ini
+  when: openvswitch_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean openvswitch_agent.ini
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/openvswitch_agent.ini'
+  when: openvswitch_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy metadata_agent.ini
+  copy:
+    src: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/bck.metadata_agent.ini'
+    dest: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+    owner: root
+    mode: 0640
+
+- name: Add nova_metadata_host to metadata_agent.ini file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+    insertafter: '#fatal_deprecations = false'
+    line: "nova_metadata_host = {{ nova_ip }}"
+
+- name: Add metadata_secret to metadata_agent.ini file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+    insertafter: 'nova_metadata_host = {{ nova_ip }}'
+    line: "metadata_proxy_shared_secret = {{ METADATA_SECRET }}"
+
+- name: Add memcached ip to metadata_agent.ini file
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+    insertafter: '#memcache_servers = localhost:11211'
+    line: "memcache_servers = {{ memcached_ip }}:11211"
+
+- name: Check if metadata_agent.ini file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+  register: metadata_agent
+
+- name: Copy metadata_agent.ini to {{ CONTAINER_NEUTRON }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini {{ CONTAINER_NEUTRON }}:/etc/neutron/metadata_agent.ini
+  when: metadata_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Clean metadata_agent.ini
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/ansible/roles/13-neutron_config/templates/metadata_agent.ini'
+  when: metadata_agent.stat.exists and containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on metadata_agent.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/metadata_agent.ini'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on openvswitch_agent.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/plugins/ml2/openvswitch_agent.ini'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on ml2_conf.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/plugins/ml2/ml2_conf.ini'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on dhcp_agent.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/dhcp_agent.ini'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on l3_agent.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/l3_agent.ini'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change owner/group on neutron.conf
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'chown root:neutron /etc/neutron/neutron.conf'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Change api-paste.ini folder
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'cp /usr/share/neutron/api-paste.ini /etc/neutron/'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Copy nova.conf from {{ CONTAINER_NOVA }}
+  command: >
+    docker cp {{ CONTAINER_NOVA }}:/etc/nova/nova.conf {{ PROJECT_PATH }}/nova.conf
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Modify default section of nova.conf (1)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/nova.conf'
+    insertafter: '#transport_url = rabbit://user:pass@ip'
+    line: "use_neutron = True"
+
+- name: Modify default section of nova.conf (2)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/nova.conf'
+    insertafter: 'use_neutron = True'
+    line: "firewall_driver = nova.virt.firewall.NoopFirewallDriver"
+
+- name: Modify default section of nova.conf (3)
+  lineinfile:
+    path: '{{ PROJECT_PATH }}/nova.conf'
+    insertafter: 'firewall_driver = nova.virt.firewall.NoopFirewallDriver'
+    line: "linuxnet_interface_driver = nova.network.linux_net.LinuxOVSInterfaceDriver"
+
+- name: Add neutron section of nova.conf
+  blockinfile:
+    path: '{{ PROJECT_PATH }}/nova.conf'
+    marker: ''
+    insertafter: EOF
+    block: |
+      [neutron]
+      auth_url = http://{{ keystone_ip }}:{{ PORT1_KEYSTONE }}
+      auth_type = password
+      project_domain_name = default
+      user_domain_name = default
+      region_name = RegionOne
+      project_name = service
+      username = neutron
+      password = {{ NEUTRON_PASS }}
+      service_metadata_proxy = True
+      metadata_proxy_shared_secret = {{ METADATA_SECRET }}
+
+- name: Check if nova.conf file exists
+  stat:
+    path: '{{ PROJECT_PATH }}/nova.conf'
+  register: nova_conf
+
+- name: Copy nova.conf to {{ CONTAINER_NOVA }}
+  command: >
+    docker cp {{ PROJECT_PATH }}/nova.conf {{ CONTAINER_NOVA }}:/etc/nova/nova.conf
+  when: nova_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Clean nova.conf
+  file:
+    state: absent
+    path: '{{ PROJECT_PATH }}/nova.conf'
+  when: nova_conf.stat.exists and containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Change owner/group on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'chown root:nova /etc/nova/nova.conf'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
+- name: Check if symbolic link already exists
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'test -f /etc/neutron/plugin.ini'
+  register: symlink
+  changed_when: symlink.rc == 0
+  ignore_errors: yes
+
+- name: Symbolic link to /etc/neutron/plugin.ini
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'ln -s /etc/neutron/plugins/ml2/ml2_conf.ini /etc/neutron/plugin.ini'
+  when: symlink.rc == 1
+
+- name: Populate the database
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'su -s /bin/sh -c "neutron-db-manage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade head" neutron'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Create file to start services
+  command: >
+    docker exec {{ CONTAINER_NEUTRON }} sh -c 'su -s /bin/sh -c "touch start_services"'
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Restart {{ CONTAINER_NEUTRON }}
+  command: >
+    docker restart {{ CONTAINER_NEUTRON }}
+  when: containers.stdout.find(CONTAINER_NEUTRON) != -1
+
+- name: Restart {{ CONTAINER_NOVA }}
+  command: >
+    docker restart {{ CONTAINER_NOVA }}
+  when: containers.stdout.find(CONTAINER_NOVA) != -1

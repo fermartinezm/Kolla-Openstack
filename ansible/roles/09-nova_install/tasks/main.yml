@@ -157,6 +157,7 @@
       - '{{ PORT6_NOVA }}:{{ PORT6_NOVA }}'
       - '{{ PORT2_HTTPD }}:{{ PORT1_HTTPD }}'
     state: started
+    privileged: yes
 
 - name: Check if {{ NOVA_USER }} user already exists
   command: >
@@ -185,7 +186,7 @@
 
 - name: Create {{ NOVA_SERVICE_NAME }} service
   command: >
-    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ NOVA_SERVICE_NAME }} --description "OpenStack Image" compute'
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ NOVA_SERVICE_NAME }} --description "OpenStack Compute Service" compute'
   when: service.stdout.find(NOVA_SERVICE_NAME) == -1
 
 - name: Check if {{ PLACEMENT_USER }} user already exists
@@ -215,7 +216,7 @@
 
 - name: Create {{ PLACEMENT_SERVICE_NAME }} service
   command: >
-    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ PLACEMENT_SERVICE_NAME }} --description "OpenStack Image" placement'
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ PLACEMENT_SERVICE_NAME }} --description "OpenStack Compute Placement Service" placement'
   when: service.stdout.find(PLACEMENT_SERVICE_NAME) == -1
 
 - name: Inspect {{ CONTAINER_NOVA }}

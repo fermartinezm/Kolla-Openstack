@@ -1,0 +1,111 @@
+---
+- name: Show databases
+  command: docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show databases;" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: databases
+  changed_when: databases.rc == 0
+
+- name: Create {{ NEUTRON_DB }} database
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "create database {{ NEUTRON_DB }};" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: databases.stdout.find(NEUTRON_DB) == -1
+
+- name: Check privileges for {{ NEUTRON_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NEUTRON_DB_USER }}\"@\"localhost\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: localhost_grants
+  changed_when: localhost_grants.rc == 1 or localhost_grants.rc == 0
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NEUTRON_DB_USER }}@'localhost'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NEUTRON_DB }}.* to {{ NEUTRON_DB_USER }}@\"localhost\" identified by \"{{ NEUTRON_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: localhost_grants.stdout.find('@localhost') == -1 or localhost_grants.stderr.find('ERROR 1141') != -1
+
+- name: Check privileges for {{ NEUTRON_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "show grants for \"{{ NEUTRON_DB_USER }}\"@\"%\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  register: all_hosts_grants
+  changed_when: all_hosts_grants.rc == 0 or all_hosts_grants.rc == 1
+  ignore_errors: True
+
+- name: Grant all privileges to {{ NEUTRON_DB_USER }}@'%'
+  command: >
+    docker exec {{ CONTAINER_MARIADB }} sh -c 'mysql -e "grant all privileges on {{ NEUTRON_DB }}.* to {{ NEUTRON_DB_USER }}@\"%\" identified by \"{{ NEUTRON_DB_PASS }}\";" -u root -p{{ MARIADB_ROOT_PASS }}'
+  when: all_hosts_grants.stdout.find('@%') == -1 or all_hosts_grants.stderr.find('ERROR 1141') != -1
+
+- name: Create {{ IMAGE_NEUTRON }}
+  docker_image:
+    build:
+      path: '{{ PROJECT_PATH }}/dockers/neutron'
+      pull: no
+    name: '{{ IMAGE_NEUTRON }}'
+    source: build
+
+- name: Create {{ CONTAINER_NEUTRON }}
+  docker_container:
+    name: '{{ CONTAINER_NEUTRON }}'
+    image: '{{ IMAGE_NEUTRON }}'
+    published_ports: 
+      - '{{ PORT_NEUTRON }}:{{ PORT_NEUTRON }}'
+      - '{{ PORT_OVS }}:{{ PORT_OVS }}'
+    state: started
+    privileged: yes
+
+- name: Check if {{ NEUTRON_USER }} user already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source /root/admin-openrc && openstack user list'
+  register: user_list
+
+- name: Create {{ NEUTRON_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack user create --domain default --project service --password {{ NEUTRON_PASS }} {{ NEUTRON_USER }}'
+  when: user_list.stdout.find(NEUTRON_USER) == -1
+
+- name: Check if {{ NEUTRON_USER }} user has admin role
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role assignment list --names'
+  register: role_asssignment
+
+- name: Add admin role to {{ NEUTRON_USER }} user
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack role add --project service --user {{ NEUTRON_USER }} admin'
+  when: role_asssignment.stdout.find(NEUTRON_USER) == -1
+
+- name: Check if {{ NEUTRON_SERVICE_NAME }} service already exists
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service list'
+  register: service
+
+- name: Create {{ NEUTRON_SERVICE_NAME }} service
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack service create --name {{ NEUTRON_SERVICE_NAME }} --description "OpenStack Networking Service" network'
+  when: service.stdout.find(NEUTRON_SERVICE_NAME) == -1
+
+- name: Inspect {{ CONTAINER_NEUTRON }}
+  command: docker inspect {{ CONTAINER_NEUTRON }}
+  register: neutron_ip
+  changed_when: neutron_ip.rc == 0
+
+- name: Get {{ CONTAINER_NEUTRON }} IP
+  set_fact:
+    neutron_ip: "{{ neutron_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
+- name: Check if {{ NEUTRON_SERVICE_NAME }} endpoints already exist
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint list'
+  register: endpoints
+
+- name: Create {{ NEUTRON_SERVICE_NAME }} public endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne network public http://{{ neutron_ip }}:{{ PORT_NEUTRON }}'
+  when: endpoints.stdout.find(NEUTRON_SERVICE_NAME) == -1
+
+- name: Create {{ NEUTRON_SERVICE_NAME }} internal endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne network internal http://{{ neutron_ip }}:{{ PORT_NEUTRON }}'
+  when: endpoints.stdout.find(NEUTRON_SERVICE_NAME) == -1
+
+- name: Create {{ NEUTRON_SERVICE_NAME }} admin endpoint
+  command: >
+    docker exec {{ CONTAINER_KEYSTONE }} sh -c 'source ~/admin-openrc && openstack endpoint create --region RegionOne network admin http://{{ neutron_ip }}:{{ PORT_NEUTRON }}'
+  when: endpoints.stdout.find(NEUTRON_SERVICE_NAME) == -1

@@ -217,6 +217,11 @@
     docker exec {{ CONTAINER_NOVA }} sh -c 'su -s /bin/bash nova -c "nova-manage cell_v2 create_cell --name cell1"'
   when: containers.stdout.find(CONTAINER_NOVA) != -1 and cell1_exists.stdout.find('cell1') == -1
 
+- name: Start nova services
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'touch start_nova'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
 - name: Restart {{ CONTAINER_KEYSTONE }}
   command: >
     docker restart {{ CONTAINER_KEYSTONE }}

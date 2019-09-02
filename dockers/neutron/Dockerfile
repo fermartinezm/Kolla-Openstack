@@ -16,17 +16,16 @@ RUN rpmbuild -bb --nocheck openvswitch-2.11.0/rhel/openvswitch-fedora.spec
 RUN exit
 RUN yum localinstall /home/ovs/rpmbuild/RPMS/x86_64/openvswitch-2.11.0-1.el7.x86_64.rpm -y
 
-# Install nova
+# Install neutron
 RUN yum update -y
 RUN yum -y install centos-release-openstack-stein
 RUN sed -i -e "s/enabled=1/enabled=0/g" /etc/yum.repos.d/CentOS-OpenStack-stein.repo
-RUN yum -y install qemu-kvm libvirt virt-install
-RUN yum --enablerepo=centos-openstack-stein,epel -y install openstack-nova-compute install openstack-neutron openstack-neutron-ml2 openstack-neutron-openvswitch
+RUN yum --enablerepo=centos-openstack-stein,epel -y install openstack-neutron openstack-neutron-ml2 openstack-neutron-openvswitch libibverbs
 RUN yum clean all
 
-EXPOSE 5900-5999
+EXPOSE 9696 6640
 
-ADD run-nova-compute.sh /run-nova-compute.sh
-RUN chmod -v +x /run-nova-compute.sh
+ADD run-neutron.sh /run-neutron.sh
+RUN chmod -v +x /run-neutron.sh
 
-CMD ["/run-nova-compute.sh"]
+CMD ["/run-neutron.sh"]
