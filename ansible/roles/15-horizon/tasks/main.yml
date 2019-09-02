@@ -33,6 +33,15 @@
   set_fact:
     keystone_ip: "{{ keystone_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
 
+- name: Inspect {{ CONTAINER_HORIZON }}
+  command: docker inspect {{ CONTAINER_HORIZON }}
+  register: horizon_ip
+  changed_when: horizon_ip.rc == 0
+
+- name: Get {{ CONTAINER_HORIZON }} IP
+  set_fact:
+    horizon_ip: "{{ horizon_ip.stdout.split('\"NetworkSettings\"')[1].split('\"IPAddress\"')[1].split(',')[0].split(':')[1].split('\"')[1] | lower }}"
+
 - name: Check if {{ CONTAINER_HORIZON }} exits
   command: docker ps -a
   register: containers
@@ -100,7 +109,7 @@
   lineinfile:
     path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
     insertafter: '# ALLOWED_HOSTS = ip'
-    line: "ALLOWED_HOSTS = ['localhost', '{{ keystone_ip }}']"
+    line: "ALLOWED_HOSTS = ['localhost', '{{ keystone_ip }}', '{{ horizon_ip }}]"
 
 - name: Add memcached ip to local_settings file
   lineinfile:
