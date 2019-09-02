@@ -1,2 +1,2 @@
+# You need to install MySQL-python in CentOS before launch the installation.
 docker>=4.0.2
-MySQL-python
