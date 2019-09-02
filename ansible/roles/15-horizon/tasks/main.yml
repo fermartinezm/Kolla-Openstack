@@ -109,7 +109,7 @@
   lineinfile:
     path: '{{ PROJECT_PATH }}/ansible/roles/15-horizon/templates/local_settings'
     insertafter: '# ALLOWED_HOSTS = ip'
-    line: "ALLOWED_HOSTS = ['localhost', '{{ keystone_ip }}', '{{ horizon_ip }}]"
+    line: "ALLOWED_HOSTS = ['localhost', '{{ keystone_ip }}', '{{ horizon_ip }}']"
 
 - name: Add memcached ip to local_settings file
   lineinfile:
