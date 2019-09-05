@@ -14,6 +14,7 @@
     published_ports: '{{ PORT_START_NOVA_COMPUTE }}-{{ PORT_END_NOVA_COMPUTE }}:{{ PORT_START_NOVA_COMPUTE }}-{{ PORT_END_NOVA_COMPUTE }}'
     state: started
     privileged: yes
+    restart: yes
 
 - name: Check if {{ CONTAINER_NOVA_COMPUTE }} exits
   command: docker ps -a

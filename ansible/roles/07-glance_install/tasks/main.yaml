@@ -49,6 +49,7 @@
     volumes:
       - '{{ PROJECT_PATH }}/volumes/images:/var/lib/glance/images/'
     state: started
+    restart: yes
 
 - name: Check if service project already exists
   command: >

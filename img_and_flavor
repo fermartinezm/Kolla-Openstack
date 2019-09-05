@@ -1,0 +1,11 @@
+# Install wget in keystone
+docker exec container-keystone sh -c '. /root/admin-openrc && yum install -y wget'
+
+# Download cirros image
+docker exec container-keystone sh -c '. /root/admin-openrc && wget http://download.cirros-cloud.net/0.3.4/cirros-0.3.4-x86_64-disk.img'
+
+# Upload image to OpenStack
+docker exec container-keystone sh -c '. /root/admin-openrc && openstack image create "cirros"  --file cirros-0.3.4-x86_64-disk.img  --disk-format qcow2 --container-format bare  --publi'
+
+# Create flavor
+docker exec container-keystone sh -c '. /root/admin-openrc && openstack flavor create --id 0 --vcpus 1 --ram 2048 --disk 10 m1.small'

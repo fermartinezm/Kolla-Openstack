@@ -158,6 +158,7 @@
       - '{{ PORT2_HTTPD }}:{{ PORT1_HTTPD }}'
     state: started
     privileged: yes
+    restart: yes
 
 - name: Check if {{ NOVA_USER }} user already exists
   command: >

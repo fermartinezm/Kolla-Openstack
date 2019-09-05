@@ -19,6 +19,7 @@
       - '{{ PORT5_RABBITMQ }}:{{ PORT5_RABBITMQ }}'
       - '{{ PORT6_RABBITMQ }}:{{ PORT6_RABBITMQ }}'
     state: started
+    restart: yes
 
 - name: Inspect {{ CONTAINER_RABBITMQ }}
   command: docker inspect {{ CONTAINER_RABBITMQ }}

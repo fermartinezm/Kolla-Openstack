@@ -15,6 +15,7 @@
     volumes:
       - '{{ PROJECT_PATH }}/volumes/mysql:/var/lib/mysql'
     state: started
+    restart: yes
 
 - name: Check if {{ CONTAINER_MARIADB }} has been created
   command: docker ps -a

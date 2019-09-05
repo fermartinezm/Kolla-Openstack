@@ -14,6 +14,7 @@
     published_ports: '{{ PORT3_HTTPD }}:{{ PORT1_HTTPD }}'
     state: started
     privileged: yes
+    restart: yes
 
 - name: Inspect {{ CONTAINER_MEMCACHED }}
   command: docker inspect {{ CONTAINER_MEMCACHED }}

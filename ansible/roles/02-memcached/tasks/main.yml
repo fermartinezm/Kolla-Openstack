@@ -13,4 +13,4 @@
     image: '{{ IMAGE_MEMCACHED }}'
     published_ports: '{{ PORT_MEMCACHED }}:{{ PORT_MEMCACHED }}'
     state: started
-
+    restart: yes

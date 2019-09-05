@@ -13,3 +13,4 @@
     image: '{{ IMAGE_NTPD }}'
     published_ports: '{{ PORT_NTPD }}:{{ PORT_NTPD }}/udp'
     state: started
+    restart: yes

@@ -50,3 +50,4 @@
       - '{{ PORT2_KEYSTONE }}:{{ PORT2_KEYSTONE }}'
       - '{{ PORT1_HTTPD }}:{{ PORT1_HTTPD }}'
     state: started
+    restart: yes

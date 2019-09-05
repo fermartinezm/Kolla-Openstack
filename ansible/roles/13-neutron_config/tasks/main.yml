@@ -325,6 +325,11 @@
     docker exec {{ CONTAINER_NEUTRON }} sh -c 'cp /usr/share/neutron/api-paste.ini /etc/neutron/'
   when: containers.stdout.find(CONTAINER_NEUTRON) != -1
 
+- name: Change owner/group on nova.conf
+  command: >
+    docker exec {{ CONTAINER_NOVA }} sh -c 'chown root:neutron /etc/neutron/api-paste.ini'
+  when: containers.stdout.find(CONTAINER_NOVA) != -1
+
 - name: Copy nova.conf from {{ CONTAINER_NOVA }}
   command: >
     docker cp {{ CONTAINER_NOVA }}:/etc/nova/nova.conf {{ PROJECT_PATH }}/nova.conf

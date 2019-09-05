@@ -50,6 +50,7 @@
       - '{{ PORT_OVS }}:{{ PORT_OVS }}'
     state: started
     privileged: yes
+    restart: yes
 
 - name: Check if {{ NEUTRON_USER }} user already exists
   command: >
